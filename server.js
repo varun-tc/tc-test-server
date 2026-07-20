@@ -48,19 +48,26 @@ app.get("/cookies", (req, res) => {
 
 // Set a single cookie by name/value then redirect to /cookies
 // Mirrors: httpbin /cookies/set/:name/:value
+// NOTE: responds directly (200) instead of redirecting to /cookies. Confirmed
+// via a real Thunder Client CLI run: a Set-Cookie header carried on a 302
+// redirect response gets applied fine within that single request's own
+// redirect-follow, but does NOT persist into the CLI's cookie jar for reuse
+// by a later, separate `tc` invocation. A direct 200 response with
+// Set-Cookie does persist correctly across invocations, so that's what
+// cross-request cookie-persistence tests need here.
 app.get("/cookies/set/:name/:value", (req, res) => {
     const { name, value } = req.params;
     res.cookie(name, value, { httpOnly: false });
-    res.redirect("/cookies");
+    res.status(200).json({ cookies: { [name]: value } });
 });
 
-// Set multiple cookies via query params then redirect to /cookies
-// Mirrors: httpbin /cookies/set?a=1&b=2&c=3
+// Set multiple cookies via query params. Mirrors: httpbin /cookies/set?a=1&b=2&c=3
+// See note above re: why this responds directly instead of redirecting.
 app.get("/cookies/set", (req, res) => {
     for (const [name, value] of Object.entries(req.query)) {
         res.cookie(name, value, { httpOnly: false });
     }
-    res.redirect("/cookies");
+    res.status(200).json({ cookies: req.query });
 });
 
 // Delete a single cookie by name then redirect to /cookies
