@@ -1,5 +1,6 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
+const { graphql, buildSchema } = require("graphql");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -142,7 +143,136 @@ app.get("/bearer", (req, res) => {
     res.status(401).json({ authenticated: false });
 });
 
+// ─── FAKE DATA (replaces jsonplaceholder.typicode.com) ────────────────────────
+// Statically generated, deterministic -- same shape/scale as jsonplaceholder so
+// existing json-query assertions (json[0].userId, json[-1].id, etc.) still hold.
+const posts = Array.from({ length: 100 }, (_, i) => ({
+    userId: Math.floor(i / 10) + 1,
+    id: i + 1,
+    title: `post title ${i + 1}`,
+    body: `post body text for post ${i + 1}`,
+}));
+
+const users = Array.from({ length: 10 }, (_, i) => ({
+    id: i + 1,
+    name: `User ${i + 1}`,
+    username: `user${i + 1}`,
+    email: `user${i + 1}@example.com`,
+}));
+
+// jsonplaceholder's real /photos returns 5000 items; matched here so the
+// responseLimit dual-run test still has a genuinely large payload to compare.
+const photos = Array.from({ length: 5000 }, (_, i) => ({
+    albumId: Math.floor(i / 50) + 1,
+    id: i + 1,
+    title: `photo title ${i + 1}`,
+    url: `https://tc-test-server.onrender.com/files/photo-${i + 1}.jpg`,
+    thumbnailUrl: `https://tc-test-server.onrender.com/files/thumb-${i + 1}.jpg`,
+}));
+
+app.get("/posts", (req, res) => res.status(200).json(posts));
+app.get("/users", (req, res) => res.status(200).json(users));
+app.get("/photos", (req, res) => res.status(200).json(photos));
+
+// ─── SSE (Server-Sent Events) ───────────────────────────────────────────────
+// Replaces sse.dev/test and postman-echo.com/server-events/:n.
+// Streams `count` events (default 5) one per second, then ends the response.
+app.get("/sse", (req, res) => {
+    const count = Math.min(parseInt(req.query.count, 10) || 5, 50);
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+    });
+    let sent = 0;
+    const interval = setInterval(() => {
+        sent += 1;
+        res.write(`id: ${sent}\ndata: ${JSON.stringify({ event: sent, message: "tick" })}\n\n`);
+        if (sent >= count) {
+            clearInterval(interval);
+            res.end();
+        }
+    }, 1000);
+    req.on("close", () => clearInterval(interval));
+});
+
+// ─── GRAPHQL ─────────────────────────────────────────────────────────────────
+// Self-hosted replacement for countries.trevorblades.com/graphql, so GraphQL
+// body tests don't depend on an external third-party API.
+const graphqlSchema = buildSchema(`
+    type Country {
+        code: String
+        name: String
+        capital: String
+        currency: String
+        emoji: String
+    }
+
+    type Query {
+        countries: [Country]
+        country(code: String!): Country
+    }
+`);
+
+const countries = [
+    { code: "US", name: "United States", capital: "Washington D.C.", currency: "USD", emoji: "🇺🇸" },
+    { code: "GB", name: "United Kingdom", capital: "London", currency: "GBP", emoji: "🇬🇧" },
+    { code: "IN", name: "India", capital: "New Delhi", currency: "INR", emoji: "🇮🇳" },
+    { code: "DE", name: "Germany", capital: "Berlin", currency: "EUR", emoji: "🇩🇪" },
+    { code: "JP", name: "Japan", capital: "Tokyo", currency: "JPY", emoji: "🇯🇵" },
+    { code: "AU", name: "Australia", capital: "Canberra", currency: "AUD", emoji: "🇦🇺" },
+];
+
+const graphqlRoot = {
+    countries: () => countries,
+    country: ({ code }) => countries.find((c) => c.code === code.toUpperCase()) || null,
+};
+
+app.post("/graphql", async (req, res) => {
+    try {
+        const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+        const { query, operationName } = body;
+        let { variables } = body;
+
+        // Thunder Client sends `variables` as a JSON-encoded string (e.g. "{}"),
+        // not an object -- graphql-js requires a real object or throws.
+        if (typeof variables === "string") {
+            variables = variables.trim() === "" ? {} : JSON.parse(variables);
+        }
+
+        if (!query) {
+            return res.status(400).json({ errors: [{ message: "Must provide query string." }] });
+        }
+
+        const result = await graphql({
+            schema: graphqlSchema,
+            source: query,
+            rootValue: graphqlRoot,
+            variableValues: variables || {},
+            operationName,
+        });
+        res.status(200).json(result);
+    } catch (err) {
+        res.status(400).json({ errors: [{ message: err.message }] });
+    }
+});
+
+// ─── WEBSOCKET ───────────────────────────────────────────────────────────────
+// Replaces echo.websocket.org -- echoes back whatever message is sent.
+// Attached to the SAME http.Server Express uses (one port, Render only
+// routes external traffic to one port per web service).
+const { WebSocketServer } = require("ws");
+const http = require("http");
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: "/ws" });
+wss.on("connection", (ws) => {
+    ws.send(JSON.stringify({ message: "connected" }));
+    ws.on("message", (data) => {
+        ws.send(data.toString());
+    });
+});
+
 // ─── START ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`tc-test server running on http://localhost:${PORT}`);
 });
