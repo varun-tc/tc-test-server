@@ -73,9 +73,12 @@ app.get("/cookies/set", (req, res) => {
 
 // Delete a single cookie by name then redirect to /cookies
 // Mirrors: httpbin /cookies/delete/:name
+// Responds directly (200) instead of redirecting -- same fix as /cookies/set:
+// a Set-Cookie (here, a clear) carried on a 302 redirect response doesn't
+// persist into the CLI's cross-invocation cookie jar, confirmed via a real run.
 app.get("/cookies/delete/:name", (req, res) => {
     res.clearCookie(req.params.name);
-    res.redirect("/cookies");
+    res.status(200).json({ deleted: req.params.name });
 });
 
 // ─── REDIRECTS ───────────────────────────────────────────────────────────────
@@ -194,6 +197,14 @@ app.get("/sse", (req, res) => {
         }
     }, 1000);
     req.on("close", () => clearInterval(interval));
+});
+
+// ─── JSON served as text/plain ──────────────────────────────────────────────
+// Edge case: valid JSON body, but the Content-Type header says text/plain
+// instead of application/json -- tests whether TC still detects/parses it.
+app.get("/json-as-text", (req, res) => {
+    res.type("text/plain");
+    res.send(JSON.stringify({ message: "valid json served as text/plain", number: 42 }));
 });
 
 // ─── GRAPHQL ─────────────────────────────────────────────────────────────────
