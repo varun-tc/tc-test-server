@@ -207,6 +207,18 @@ app.get("/json-as-text", (req, res) => {
     res.send(JSON.stringify({ message: "valid json served as text/plain", number: 42 }));
 });
 
+// ─── Native XML response ─────────────────────────────────────────────────────
+// A GET response that is genuinely XML (not an echo of a posted body), for
+// testing XML response auto-detection/convert-to-JSON specifically.
+app.get("/xml", (req, res) => {
+    res.type("application/xml");
+    res.send(
+        "<catalog>" +
+        "<product><name>Widget</name><price>19.99</price><inStock>true</inStock></product>" +
+        "</catalog>"
+    );
+});
+
 // ─── GRAPHQL ─────────────────────────────────────────────────────────────────
 // Self-hosted replacement for countries.trevorblades.com/graphql, so GraphQL
 // body tests don't depend on an external third-party API.
